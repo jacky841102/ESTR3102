@@ -12,7 +12,6 @@
 #include"cd.h"
 
 void cd(char* dest){
-    dest[strlen(dest)-1] = '\0';
     if(chdir(dest) != -1){
         return;
     }else{

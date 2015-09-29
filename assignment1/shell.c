@@ -21,19 +21,27 @@ int main(void){
     while(1){
         printf("[3150 shell:%s]$ ", getcwd(path, PATH_MAX+1));
         fgets(buf, 255, stdin);
+        buf[strlen(buf)-1] = '\0';
 
         //tokenize command
         char* token = strtok(buf, " ");
        
         if(strcmp(token, "cd") == 0){
             token = strtok(NULL, " ");
-            if(strtok(NULL, " ")!=NULL){
+            if(token == NULL){
+                printf("cd: wrong number of arguments\n");
+            }
+            else if(strtok(NULL, " ")!=NULL){
                 printf("cd: wrong number of arguments\n");
             }else{
                 cd(token);
             }
         }else if(strcmp(token, "exit") == 0){
-            
+            if(strtok(NULL, " ")!=NULL){
+                printf("exit: wrong number of arguments\n");
+            }else{
+                exit(0);
+            }
         }else if(strcmp(token, "fg") == 0){
 
         }else if(strcmp(token, "jobs") == 0){
