@@ -11,7 +11,8 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/wait.h>
-#include "cd.h"
+#include <errno.h>
+#include <glob.h>
 
 
 
@@ -33,7 +34,9 @@ int main(void){
             if(token == NULL || strtok(NULL, " ")!=NULL){
                 printf("cd: wrong number of arguments\n");
             }else{
-                cd(token);
+                 if(chdir(token) == -1){
+                    printf("[%s]: cannot change directory\n", token);
+                }
             }
         }else if(strcmp(token, "exit") == 0){
             if(strtok(NULL, " ")!=NULL){
@@ -46,18 +49,47 @@ int main(void){
         }else if(strcmp(token, "jobs") == 0){
 
         }else{
-            int i = 0;
+            int i = 0, flagNum = 0;
+            glob_t pg;
+            pg.gl_offs = 0;
             while(token != NULL){
                 argArray[i] = token;
+                if(token[0] == '-'){
+                    flagNum++;
+                }
                 token = strtok(NULL, " ");
                 i++;
             }
-            argArray[i] = NULL;
+            
+            int argNum = i;
+            pg.gl_offs = flagNum + 1;
+            if(argNum > 1){
+                glob(argArray[1], GLOB_DOOFFS, NULL, &pg);
+                if(argNum > 2){
+                    for(i = 2; i < argNum; i++){
+                        glob(argArray[i], GLOB_DOOFFS | GLOB_APPEND, NULL, &pg);
+                    }
+                }
+            }
+
             size_t pid;
             pid = fork();
             setenv("PATH", "/bin:/usr/bin:.",1);
             if(!pid){
-                execvp(argArray[0], argArray);
+
+                if(pg.gl_pathc == 0){
+                    argArray[argNum] = NULL;
+                    if(execvp(argArray[0], argArray) == -1){
+                        printf("%s: command not found\n", argArray[0]);
+                    }
+                }else{
+                    for(i = 0; i < pg.gl_offs; i++){
+                        pg.gl_pathv[i] = argArray[i];
+                    }
+                    if(execvp(argArray[0], pg.gl_pathv) == -1){
+                        printf("%s: command not found\n", argArray[0]);
+                    }
+                }
             }else{
                 waitpid(pid, NULL, WUNTRACED);
             }
