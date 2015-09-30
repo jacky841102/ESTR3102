@@ -13,7 +13,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <glob.h>
-
+#include <signal.h>
 
 
 
@@ -21,14 +21,21 @@ int main(void){
     char buf[255];
     char path[255];
     char* argArray[100];
+    signal(SIGINT,SIG_IGN);
+    signal(SIGQUIT,SIG_IGN);
+    signal(SIGTERM,SIG_IGN);
+    signal(SIGTSTP,SIG_IGN);
     while(1){
+
         printf("[3150 shell:%s]$ ", getcwd(path, PATH_MAX+1));
         fgets(buf, 255, stdin);
         buf[strlen(buf)-1] = '\0';
+        
+       
 
         //tokenize command
+        if(strlen(buf) == 0) continue;
         char* token = strtok(buf, " ");
-       
         if(strcmp(token, "cd") == 0){
             token = strtok(NULL, " ");
             if(token == NULL || strtok(NULL, " ")!=NULL){
@@ -49,7 +56,7 @@ int main(void){
         }else if(strcmp(token, "jobs") == 0){
 
         }else{
-            int i = 0, flagNum = 0;
+            size_t i = 0, flagNum = 0;
             glob_t pg;
             pg.gl_offs = 0;
             while(token != NULL){
@@ -61,7 +68,7 @@ int main(void){
                 i++;
             }
             
-            int argNum = i;
+            size_t argNum = i;
             pg.gl_offs = flagNum + 1;
             if(argNum > 1){
                 glob(argArray[1], GLOB_DOOFFS, NULL, &pg);
@@ -76,6 +83,10 @@ int main(void){
             pid = fork();
             setenv("PATH", "/bin:/usr/bin:.",1);
             if(!pid){
+                signal(SIGINT,SIG_DFL);
+                signal(SIGQUIT,SIG_DFL);
+                signal(SIGTERM,SIG_DFL);
+                signal(SIGTSTP,SIG_DFL);
 
                 if(pg.gl_pathc == 0){
                     argArray[argNum] = NULL;
