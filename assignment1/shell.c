@@ -28,13 +28,13 @@ int main(void){
     while(1){
 
         printf("[3150 shell:%s]$ ", getcwd(path, PATH_MAX+1));
-        fgets(buf, 255, stdin);
-        buf[strlen(buf)-1] = '\0';
+        if(fgets(buf, 255, stdin) == NULL) exit(0);
         
-       
 
-        //tokenize command
-        if(strlen(buf) == 0) continue;
+        buf[strlen(buf)-1] = '\0';
+        if(buf[0] == '\0') continue;
+        
+
         char* token = strtok(buf, " ");
         if(strcmp(token, "cd") == 0){
             token = strtok(NULL, " ");
