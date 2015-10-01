@@ -59,6 +59,7 @@ int main(void){
             size_t i = 0, flagNum = 0;
             glob_t pg;
             pg.gl_offs = 0;
+	    pg.gl_pathc = 0;
             while(token != NULL){
                 argArray[i] = token;
                 if(token[0] == '-'){
@@ -87,7 +88,7 @@ int main(void){
                 signal(SIGQUIT,SIG_DFL);
                 signal(SIGTERM,SIG_DFL);
                 signal(SIGTSTP,SIG_DFL);
-
+		printf("gl_pathc: %d\n",pg.gl_pathc);
                 if(pg.gl_pathc == 0){
                     argArray[argNum] = NULL;
                     if(execvp(argArray[0], argArray) == -1){
