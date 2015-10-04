@@ -18,22 +18,21 @@
 
 
 int main(void){
-    char buf[255];
+    char buf[PATH_MAX+1];
     char path[255];
-    char* argArray[100];
+    char* argArray[255];
     signal(SIGINT,SIG_IGN);
     signal(SIGQUIT,SIG_IGN);
     signal(SIGTERM,SIG_IGN);
     signal(SIGTSTP,SIG_IGN);
     while(1){
 
-        printf("[3150 shell:%s]$ ", getcwd(path, PATH_MAX+1));
+        fflush(stdin);
+        getcwd(path, PATH_MAX+1);
+        printf("[3150 shell:%s]$ ", path);
         if(fgets(buf, 255, stdin) == NULL) exit(0);
-        
-
         buf[strlen(buf)-1] = '\0';
         if(buf[0] == '\0') continue;
-        
 
         char* token = strtok(buf, " ");
         if(strcmp(token, "cd") == 0){
@@ -42,7 +41,7 @@ int main(void){
                 printf("cd: wrong number of arguments\n");
             }else{
                  if(chdir(token) == -1){
-                    printf("[%s]: cannot change directory\n", token);
+                    printf("%s: cannot change directory\n", token);
                 }
             }
         }else if(strcmp(token, "exit") == 0){
@@ -90,15 +89,26 @@ int main(void){
                 signal(SIGTSTP,SIG_DFL);
                 if(pg.gl_pathc == 0){
                     argArray[argNum] = NULL;
-                    if(execvp(argArray[0], argArray) == -1){
+                    
+                    execvp(argArray[0], argArray);
+                    if(errno == ENOENT){
                         printf("%s: command not found\n", argArray[0]);
+                        exit(0);
+                    }else if(errno != ENOENT){
+                        printf("%s: unknown error\n", argArray[0]);
+                        exit(0);
                     }
                 }else{
                     for(i = 0; i < pg.gl_offs; i++){
                         pg.gl_pathv[i] = argArray[i];
                     }
-                    if(execvp(argArray[0], pg.gl_pathv) == -1){
+                    execvp(argArray[0], argArray);
+                    if(errno == ENOENT){
                         printf("%s: command not found\n", argArray[0]);
+                        exit(0);
+                    }else if(errno != ENOENT){
+                        printf("%s: unknown error\n", argArray[0]);
+                        exit(0);
                     }
                 }
             }else{
