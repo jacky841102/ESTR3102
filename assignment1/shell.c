@@ -19,18 +19,16 @@
 
 int main(void){
     char buf[PATH_MAX+1];
-    char path[255];
-    char* argArray[255];
+    char path[PATH_MAX+1];
+    char* argArray[PATH_MAX];
     signal(SIGINT,SIG_IGN);
     signal(SIGQUIT,SIG_IGN);
     signal(SIGTERM,SIG_IGN);
     signal(SIGTSTP,SIG_IGN);
     while(1){
-
-        fflush(stdin);
         getcwd(path, PATH_MAX+1);
         printf("[3150 shell:%s]$ ", path);
-        if(fgets(buf, 255, stdin) == NULL) exit(0);
+        if(fgets(buf, 256, stdin) == NULL) exit(0);
         buf[strlen(buf)-1] = '\0';
         if(buf[0] == '\0') continue;
 
@@ -89,7 +87,6 @@ int main(void){
                 signal(SIGTSTP,SIG_DFL);
                 if(pg.gl_pathc == 0){
                     argArray[argNum] = NULL;
-                    
                     execvp(argArray[0], argArray);
                     if(errno == ENOENT){
                         printf("%s: command not found\n", argArray[0]);
@@ -102,7 +99,7 @@ int main(void){
                     for(i = 0; i < pg.gl_offs; i++){
                         pg.gl_pathv[i] = argArray[i];
                     }
-                    execvp(argArray[0], argArray);
+                    execvp(argArray[0], pg.gl_pathv);
                     if(errno == ENOENT){
                         printf("%s: command not found\n", argArray[0]);
                         exit(0);
