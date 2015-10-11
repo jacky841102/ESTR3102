@@ -69,10 +69,10 @@ int main(void){
             size_t argNum = i;
             pg.gl_offs = flagNum + 1;
             if(argNum > 1){
-                glob(argArray[1], GLOB_DOOFFS, NULL, &pg);
+                glob(argArray[1], GLOB_DOOFFS | GLOB_NOCHECKS, NULL, &pg);
                 if(argNum > 2){
                     for(i = 2; i < argNum; i++){
-                        glob(argArray[i], GLOB_DOOFFS | GLOB_APPEND, NULL, &pg);
+                        glob(argArray[i], GLOB_DOOFFS | GLOB_APPEND | GLOB_NOCHECKS, NULL, &pg);
                     }
                 }
             }
@@ -104,7 +104,7 @@ int main(void){
                         printf("%s: command not found\n", argArray[0]);
                         exit(0);
                     }else if(errno != ENOENT){
-                        printf("%s: unknown error\n", argArray[0]);
+                       printf("%s: unknown error\n", argArray[0]);
                         exit(0);
                     }
                 }
