@@ -84,32 +84,40 @@ int main(void){
 
             if(pipeCount > 1){
 
-            pid_t pid[100];
-            int pfd[100][2];
+                pid_t pid[100];
+                int pfd[100][2];
+                
+                int i = 0;
     
-    
-    
-    
-            int i = 0;
-    
-            for(i = 0; i < pipeCount -1; i++){
-                pipe(pfd[i]);
-            }
-
-
-            if(!(pid[0] = fork())){
-                dup2(pfd[0][1], 1);
-                for(i = 0; i < pipeCount - 1; i++){
-                    close(pfd[i][0]);
-                    close(pfd[i][1]);
+                for(i = 0; i < pipeCount -1; i++){
+                    pipe(pfd[i]);
                 }
-                execvp(pg[0].gl_pathv[0], pg[0].gl_pathv);
-            }
 
-            for(i = 1; i < pipeCount - 1; i++){
+
+                if(!(pid[0] = fork())){
+                    dup2(pfd[0][1], 1);
+                    for(i = 0; i < pipeCount - 1; i++){
+                        close(pfd[i][0]);
+                        close(pfd[i][1]);
+                    }
+                    execvp(pg[0].gl_pathv[0], pg[0].gl_pathv);
+                }
+
+                for(i = 1; i < pipeCount - 1; i++){
+                    if(!(pid[i] = fork())){
+                        dup2(pfd[i-1][0], 0);
+                        dup2(pfd[i][1], 1);
+                        int j;
+                        for(j = 0; j < pipeCount - 1; j++){
+                            close(pfd[j][0]);
+                            close(pfd[j][1]);
+                        }
+                        execvp(pg[i].gl_pathv[0], pg[i].gl_pathv);
+                    }
+                }
+
                 if(!(pid[i] = fork())){
                     dup2(pfd[i-1][0], 0);
-                    dup2(pfd[i][1], 1);
                     int j;
                     for(j = 0; j < pipeCount - 1; j++){
                         close(pfd[j][0]);
@@ -117,26 +125,15 @@ int main(void){
                     }
                     execvp(pg[i].gl_pathv[0], pg[i].gl_pathv);
                 }
-            }
 
-            if(!(pid[i] = fork())){
-                dup2(pfd[i-1][0], 0);
-                int j;
-                for(j = 0; j < pipeCount - 1; j++){
-                    close(pfd[j][0]);
-                    close(pfd[j][1]);
+                for(i = 0; i < pipeCount - 1; i++){
+                    close(pfd[i][0]);
+                    close(pfd[i][1]);
                 }
-                execvp(pg[i].gl_pathv[0], pg[i].gl_pathv);
-            }
-
-            for(i = 0; i < pipeCount - 1; i++){
-                close(pfd[i][0]);
-                close(pfd[i][1]);
-            }
     
-            for(i = 0; i < pipeCount; i++){
-                waitpid(pid[i], NULL, WUNTRACED);
-            }
+                for(i = 0; i < pipeCount; i++){
+                    waitpid(pid[i], NULL, WUNTRACED);
+                }
 
             }else{
                 int pid;
