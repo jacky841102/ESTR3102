@@ -15,25 +15,10 @@
 #include <glob.h>
 #include <signal.h>
 
-
-#define EXEC(argArray, argArray2)   \
-do{                                   \
-    execvp(argArray[0], argArray2);  \
-    if(errno == ENOENT){    \
-        printf("%s: command not found\n", argArray[0]); \
-        exit(0);    \
-    }else if(errno != ENOENT){  \
-        printf("%s: unknown error\n", argArray[0]); \
-        exit(0);    \
-    }   \
-}while(1)
-
-
-
 int main(void){
     char buf[PATH_MAX+1];
     char path[PATH_MAX+1];
-    char* argArray[PATH_MAX];
+    char* argArr[PATH_MAX];
     signal(SIGINT,SIG_IGN);
     signal(SIGQUIT,SIG_IGN);
     signal(SIGTERM,SIG_IGN);
@@ -55,7 +40,6 @@ int main(void){
                     printf("%s: cannot change directory\n", token);
                 }
             }
-        }else if(strcmp(token, "exit") == 0){
             if(strtok(NULL, " ")!=NULL){
                 printf("exit: wrong number of arguments\n");
             }else{
@@ -66,51 +50,102 @@ int main(void){
         }else if(strcmp(token, "jobs") == 0){
 
         }else{
-            size_t i = 0, flagNum = 0;
-            glob_t pg;
-            pg.gl_offs = 0;
-	        pg.gl_pathc = 0;
-            while(token != NULL){
-                argArray[i] = token;
-                if(token[0] == '-'){
-                    flagNum++;
+             glob_t pg[100];
+             int pipeCount = 0;
+             while(token != NULL){
+                size_t i = 0;
+                pg[pipeCount].gl_offs = 0;
+                pg[pipeCount].gl_pathc = 0;
+                pg[pipeCount].gl_matchc = 0;
+                
+                while(token[0] != '|'){
+                    argArr[i] = token;
+                    i++;
+                    token = strtok(NULL, " ");
+                    if(token == NULL) break;
                 }
-                token = strtok(NULL, " ");
-                i++;
-            }
-            
-            size_t argNum = i;
-            pg.gl_offs = flagNum + 1;
-            if(argNum > 1){
-                glob(argArray[1], GLOB_DOOFFS, NULL, &pg);
-                if(argNum > 2){
-                    for(i = 2; i < argNum; i++){
-                        glob(argArray[i], GLOB_DOOFFS | GLOB_APPEND, NULL, &pg);
+        
+        
+                size_t j;
+                glob(argArr[0], GLOB_NOCHECK, NULL, &pg[pipeCount]);
+                if(i > 1){
+                    for(j = 1; j < i; j++){
+                        glob(argArr[j], GLOB_APPEND | GLOB_NOCHECK, NULL, &pg[pipeCount]);
                     }
+                }
+                
+                pipeCount++;
+                if(token == NULL) break;
+                token = strtok(NULL, " ");
+            }
+    
+            setenv("PATH", "/bin:/usr/bin:.",1);
+            
+
+            if(pipeCount > 1){
+
+            pid_t pid[100];
+            int pfd[100][2];
+    
+    
+    
+    
+            int i = 0;
+    
+            for(i = 0; i < pipeCount -1; i++){
+                pipe(pfd[i]);
+            }
+
+
+            if(!(pid[0] = fork())){
+                dup2(pfd[0][1], 1);
+                for(i = 0; i < pipeCount - 1; i++){
+                    close(pfd[i][0]);
+                    close(pfd[i][1]);
+                }
+                execvp(pg[0].gl_pathv[0], pg[0].gl_pathv);
+            }
+
+            for(i = 1; i < pipeCount - 1; i++){
+                if(!(pid[i] = fork())){
+                    dup2(pfd[i-1][0], 0);
+                    dup2(pfd[i][1], 1);
+                    int j;
+                    for(j = 0; j < pipeCount - 1; j++){
+                        close(pfd[j][0]);
+                        close(pfd[j][1]);
+                    }
+                    execvp(pg[i].gl_pathv[0], pg[i].gl_pathv);
                 }
             }
 
-            size_t pid;
-            pid = fork();
-            setenv("PATH", "/bin:/usr/bin:.",1);
-            if(!pid){
-                signal(SIGINT,SIG_DFL);
-                signal(SIGQUIT,SIG_DFL);
-                signal(SIGTERM,SIG_DFL);
-                signal(SIGTSTP,SIG_DFL);
-                if(pg.gl_pathc == 0){
-                    argArray[argNum] = NULL;
-                    EXEC(argArray, argArray);
-                }else{
-                    for(i = 0; i < pg.gl_offs; i++){
-                        pg.gl_pathv[i] = argArray[i];
-                    }
-                    EXEC(argArray, pg.gl_pathv);
+            if(!(pid[i] = fork())){
+                dup2(pfd[i-1][0], 0);
+                int j;
+                for(j = 0; j < pipeCount - 1; j++){
+                    close(pfd[j][0]);
+                    close(pfd[j][1]);
                 }
+                execvp(pg[i].gl_pathv[0], pg[i].gl_pathv);
+            }
+
+            for(i = 0; i < pipeCount - 1; i++){
+                close(pfd[i][0]);
+                close(pfd[i][1]);
+            }
+    
+            for(i = 0; i < pipeCount; i++){
+                waitpid(pid[i], NULL, WUNTRACED);
+            }
+
             }else{
-                waitpid(pid, NULL, WUNTRACED);
+                int pid;
+                if(!(pid = fork())){
+                     execvp(pg[0].gl_pathv[0], pg[0].gl_pathv);
+                }else{
+                    waitpid(pid, NULL, WUNTRACED);
+                }
             }
         }
     }
-    return 0;
 }
