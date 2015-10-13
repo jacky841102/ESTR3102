@@ -14,8 +14,41 @@
 #include <errno.h>
 #include <glob.h>
 #include <signal.h>
+#include "list.h"
+
+
+void waitChildren(Jobs* jobsHead, int pipeCount, int pid[], char cmd[]){
+    int i;
+    int status;
+    for(i = 0; i < pipeCount; i++){
+        waitpid(pid[i], &status, WUNTRACED);
+        if(WIFSTOPPED(status)){
+            Jobs* newJobs  = (Jobs*)malloc(sizeof(Jobs));
+            newJobs->pid = pid;//(pid_t*)malloc(sizeof(pid_t)*pipeCount);
+            newJobs->pidNum = pipeCount;
+            strncpy(newJobs->cmd, cmd, 255);
+            //int j;
+            //for(j = 0; j < pipeCount; j++){
+            //    newJobs->pid[j] = pid[j];
+            //}
+            list_add(jobsHead, newJobs);
+            break;
+        }
+        
+    }
+}
+
+Jobs* wakeChildren(Jobs* jobsHead, int index){
+    int i;
+    Jobs* it = list_entry(jobsHead, index);
+    for(i = 0; i < it->pidNum; i++){
+        kill(it->pid[i], SIGCONT);
+    }
+    return it;
+}
 
 int main(void){
+    char cmd[PATH_MAX+1];
     char buf[PATH_MAX+1];
     char path[PATH_MAX+1];
     char* argArr[PATH_MAX];
@@ -23,11 +56,14 @@ int main(void){
     signal(SIGQUIT,SIG_IGN);
     signal(SIGTERM,SIG_IGN);
     signal(SIGTSTP,SIG_IGN);
+    Jobs* jobsHead = (Jobs*)malloc(sizeof(Jobs));
     while(1){
         getcwd(path, PATH_MAX+1);
         printf("[3150 shell:%s]$ ", path);
-        if(fgets(buf, 256, stdin) == NULL) exit(0);
+        if(fgets(cmd, 256, stdin) == NULL) exit(0);
+        strcpy(buf, cmd);
         buf[strlen(buf)-1] = '\0';
+        cmd[strlen(cmd)-1] = '\0';
         if(buf[0] == '\0') continue;
 
         char* token = strtok(buf, " ");
@@ -40,15 +76,35 @@ int main(void){
                     printf("%s: cannot change directory\n", token);
                 }
             }
+        }else if(strcmp(token, "exit") == 0){
             if(strtok(NULL, " ")!=NULL){
                 printf("exit: wrong number of arguments\n");
             }else{
                 exit(0);
             }
         }else if(strcmp(token, "fg") == 0){
-
+            token = strtok(NULL, " ");
+            int index;
+            if(token == NULL){
+                index = 1;
+            }else{
+                sscanf(token, "%d", &index);
+            }
+            printf("index = %d\n", index);
+            Jobs* waked = wakeChildren(jobsHead, index);
+            waitChildren(jobsHead, waked->pidNum, waked->pid, waked->cmd);
+            list_del(jobsHead, waked);
         }else if(strcmp(token, "jobs") == 0){
-
+            Jobs* it = jobsHead->next;
+            int i = 1;
+            while(it != NULL){
+                printf("[%d]  %s\n", i, it->cmd);
+                it = it->next;
+                i++;
+            }
+            if(i == 1){
+                printf("No suspended jobs\n");
+            }
         }else{
              glob_t pg[100];
              int pipeCount = 0;
@@ -56,7 +112,6 @@ int main(void){
                 size_t i = 0;
                 pg[pipeCount].gl_offs = 0;
                 pg[pipeCount].gl_pathc = 0;
-                pg[pipeCount].gl_matchc = 0;
                 
                 while(token[0] != '|'){
                     argArr[i] = token;
@@ -100,6 +155,10 @@ int main(void){
                         close(pfd[i][0]);
                         close(pfd[i][1]);
                     }
+                     signal(SIGINT,SIG_DFL);
+                     signal(SIGQUIT,SIG_DFL);
+                     signal(SIGTERM,SIG_DFL);
+                     signal(SIGTSTP,SIG_DFL);
                     execvp(pg[0].gl_pathv[0], pg[0].gl_pathv);
                 }
 
@@ -112,6 +171,10 @@ int main(void){
                             close(pfd[j][0]);
                             close(pfd[j][1]);
                         }
+                        signal(SIGINT,SIG_DFL);
+                        signal(SIGQUIT,SIG_DFL);
+                        signal(SIGTERM,SIG_DFL);
+                        signal(SIGTSTP,SIG_DFL);
                         execvp(pg[i].gl_pathv[0], pg[i].gl_pathv);
                     }
                 }
@@ -123,6 +186,10 @@ int main(void){
                         close(pfd[j][0]);
                         close(pfd[j][1]);
                     }
+                    signal(SIGINT,SIG_DFL);
+                    signal(SIGQUIT,SIG_DFL);
+                    signal(SIGTERM,SIG_DFL);
+                    signal(SIGTSTP,SIG_DFL);
                     execvp(pg[i].gl_pathv[0], pg[i].gl_pathv);
                 }
 
@@ -130,17 +197,19 @@ int main(void){
                     close(pfd[i][0]);
                     close(pfd[i][1]);
                 }
-    
-                for(i = 0; i < pipeCount; i++){
-                    waitpid(pid[i], NULL, WUNTRACED);
-                }
+
+                waitChildren(jobsHead, pipeCount, pid, cmd);
 
             }else{
                 int pid;
                 if(!(pid = fork())){
+                     signal(SIGINT,SIG_DFL);
+                     signal(SIGQUIT,SIG_DFL);
+                     signal(SIGTERM,SIG_DFL);
+                     signal(SIGTSTP,SIG_DFL);
                      execvp(pg[0].gl_pathv[0], pg[0].gl_pathv);
                 }else{
-                    waitpid(pid, NULL, WUNTRACED);
+                    waitChildren(jobsHead, 1, &pid, cmd);   
                 }
             }
         }
