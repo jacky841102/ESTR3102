@@ -30,6 +30,7 @@ void setToNthClus(int n){
 	fseek(file, dataAreaPosi+bootSector.BPB_BytsPerSec*bootSector.BPB_SecPerClus*(n-2), SEEK_SET);
 }
 
+/*Find next clustor from current clustor in FAT*/
 int nextClus(int curClus){
 	long backupPos = ftell(file);
 	long pos = bootSector.BPB_BytsPerSec*(bootSector.BPB_RsvdSecCnt)+sizeof(int)*curClus;
@@ -95,6 +96,71 @@ void listDirEntry(char* targetDir){
 	fseek(file, backupPos, SEEK_SET);		
 }
 
+void to8Dot3Filename(char newFilename[11], char* filename){
+	if(strstr(filename, ".") != NULL){
+		int i;
+		for(i = 0; filename[i]!= '.'; i++) newFilename[i] = filename[i];
+		int j = i+1;
+		for(; i < 8; i++) newFilename[i] = ' ';
+		for(; j < strlen(filename); i++, j++) newFilename[i] = filename[j];
+		for(; i < 11; i++) newFilename[i] = ' '; 
+	}else{
+		int i;
+		for(i = 0; i < strlen(filename); i++) newFilename[i] = filename[i];
+		for(; i < 11; i++) newFilename[i] = ' ';
+	}
+}
+
+void recover(struct DirEntry entry, char* dest){
+	long backupPos = ftell(file);
+	setToNthClus(findFirstClus(entry));
+	FILE* outputFile = fopen(dest, "w");	
+	char charBuf;
+	while(fread(&charBuf, sizeof(char), 1, file) && charBuf != '\0') fprintf(outputFile, "%c", charBuf);
+	fclose(outputFile);
+	fseek(file, backupPos, SEEK_SET);
+}
+
+
+int recoverTargetFile(char* target, char* dest){
+	char* tokens[100];
+	int tokenNum = 0;	
+	char* tmp = strtok(target, "/");
+	while(tmp != NULL){
+		tokens[tokenNum++] = tmp;
+		tmp = strtok(NULL, "/");
+	}
+	int i = 0; 
+	long curDirClus = bootSector.BPB_RootClus;
+	for(; i < tokenNum-1; i++) curDirClus = findDirClus(curDirClus, tokens[i]);
+	char target8Dot3Name[11];
+	to8Dot3Filename(target8Dot3Name, tokens[tokenNum-1]);
+	target8Dot3Name[0] = 229;	
+	printf("target8Dot3Name: %s\n", target8Dot3Name);
+	char buf[ENTRY_PER_DIR][sizeof(struct DirEntry)];
+/* A directory may contains more than one clustor*/
+	while(curDirClus != 0){
+		setToNthClus(curDirClus);
+		fread(buf, sizeof(struct DirEntry), ENTRY_PER_DIR, file);
+		int j;
+		for(j = 0; j < ENTRY_PER_DIR && buf[j][0] != '\0'; j++, i++){
+			struct DirEntry *tmp = (struct DirEntry*)buf[j];
+			if(tmp->DIR_Attr & 16 ||  // directory
+			   tmp->DIR_Attr & 15 == 15 || //long file name
+			   tmp->DIR_Name[0] != 229) // normal file 
+				continue;
+			else{
+				if(memcmp(target8Dot3Name, tmp->DIR_Name, 11) == 0){
+					recover(*tmp, dest);
+					return 0;
+				}
+			}
+		}	
+		curDirClus = nextClus(curDirClus);
+	}
+	return -1;
+}
+
 int main(int argc, char** argv){
 	int ch, fd;
 	char *device = NULL, *targetDir = NULL, *targetFile = NULL, *dest = NULL; 
@@ -104,7 +170,7 @@ int main(int argc, char** argv){
 	}
 
 	/* Handle option argument*/
-	while((ch = getopt(argc, argv, "d:l:r:o")) != -1){
+	while((ch = getopt(argc, argv, "d:l:r:o:")) != -1){
 		switch(ch){
 			case 'd':
 				device = malloc(strlen(optarg));
@@ -117,6 +183,7 @@ int main(int argc, char** argv){
 			case 'r':
 				targetFile = malloc(strlen(optarg));
 				strcpy(targetFile, optarg);
+				break;
 			case 'o':
 				dest = malloc(strlen(optarg));
 				strcpy(dest, optarg);
@@ -141,6 +208,13 @@ int main(int argc, char** argv){
 	if(targetDir != NULL){
 		listDirEntry(targetDir);
 	}
+
+	if(targetFile != NULL){
+		recoverTargetFile(targetFile, dest);
+	}
+
+	fclose(file);
+
 	return 0;	 
 }
 
