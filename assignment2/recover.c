@@ -3,18 +3,21 @@
 #include <string.h>
 #include <unistd.h>
 #include "struct.h"
+#include <sys/stat.h>
+#include <errno.h>
 #define ENTRY_PER_DIR ((bootSector.BPB_BytsPerSec*bootSector.BPB_SecPerClus)/32)
+#define CLUSTOR_END(x) ({x >= 0xffffff8;})
 FILE* file;
 char bbuf[1024];
 struct BootEntry bootSector;
 struct DirEntry dirEntry;
-long dataAreaPosi;
-
+unsigned long dataAreaPosi;
 void usage(char* arg){
 	printf("Usage: %s -d [device filename] [other arguments]\n", arg);
 	printf("-l target            List the target directory\n");
 	printf("-r target -o dest    Recoverthe target pathname\n");
 }
+
 
 
 void printFileName(char* filename){
@@ -31,26 +34,27 @@ void setToNthClus(int n){
 }
 
 /*Find next clustor from current clustor in FAT*/
-int nextClus(int curClus){
-	long backupPos = ftell(file);
-	long pos = bootSector.BPB_BytsPerSec*(bootSector.BPB_RsvdSecCnt)+sizeof(int)*curClus;
+unsigned long nextClus(unsigned long curClus){
+	unsigned long backupPos = ftell(file);
+	unsigned long pos = bootSector.BPB_BytsPerSec*(bootSector.BPB_RsvdSecCnt)+4*(curClus-2);
 	fseek(file, pos, SEEK_SET);
-	int next; 
-	fread(&next, sizeof(int), 1, file);
+	unsigned long next; 
+	fread(&next, 4, 1, file);
+	printf("now: %u next: %u \n", curClus, next);
 	fseek(file, backupPos, SEEK_SET);
 	return next;	 
 }
 
-int findFirstClus(struct DirEntry curDirEntry){
+unsigned long findFirstClus(struct DirEntry curDirEntry){
 	return curDirEntry.DIR_FstClusHI*256+curDirEntry.DIR_FstClusLO; 
 }
 
-long findDirClus(long curDirClus, char* target){
-	long backupPos = ftell(file);
+unsigned long findDirClus(unsigned long curDirClus, char* target){
+	unsigned long backupPos = ftell(file);
 	char buf[ENTRY_PER_DIR][sizeof(struct DirEntry)];
 /* A directory may contains more than one clustor*/
-	long targetDirClus;
-	while(curDirClus != 0){
+	unsigned long targetDirClus;
+	while(!CLUSTOR_END(curDirClus)){
 		setToNthClus(curDirClus);
 		fread(buf, sizeof(struct DirEntry), ENTRY_PER_DIR, file);
 		int i;
@@ -69,9 +73,9 @@ restore:
 }
 
 void listDirEntry(char* targetDir){
-	long backupPos = ftell(file);
+	unsigned long backupPos = ftell(file);
 	char *tmp = strtok(targetDir, "/");
-	long curDirClus = bootSector.BPB_RootClus;
+	unsigned long curDirClus = bootSector.BPB_RootClus;
 	while(tmp != NULL){
 		curDirClus = findDirClus(curDirClus, tmp);
 		tmp = strtok(NULL, "/");
@@ -80,16 +84,18 @@ void listDirEntry(char* targetDir){
 	char buf[ENTRY_PER_DIR][sizeof(struct DirEntry)];
 /* A directory may contains more than one clustor*/
 	int i = 1;
-	while(curDirClus != 0){
+	while(!CLUSTOR_END(curDirClus)){
 		setToNthClus(curDirClus);
 		fread(buf, sizeof(struct DirEntry), ENTRY_PER_DIR, file);
 		int j;
-		for(j = 0; j < ENTRY_PER_DIR && buf[j][0] != '\0'; j++, i++){
+		for(j = 0; j < ENTRY_PER_DIR && buf[j][0] != '\0'; j++){
 			struct DirEntry *tmp = (struct DirEntry*)buf[j];
+			if(tmp->DIR_Attr == 0x0f) continue; //long filename 
 			printf("%d, ", i);
 			printFileName(tmp->DIR_Name);
-			if(tmp->DIR_Attr & 16) printf("/");
+			if(tmp->DIR_Attr & 0x10) printf("/"); //directory
 			printf(", %ld, %d\n", tmp->DIR_FileSize, findFirstClus(*tmp));
+			i++;
 		}	
 		curDirClus = nextClus(curDirClus);
 	}
@@ -112,11 +118,20 @@ void to8Dot3Filename(char newFilename[11], char* filename){
 }
 
 void recover(struct DirEntry entry, char* dest){
-	long backupPos = ftell(file);
+	unsigned long backupPos = ftell(file);
 	setToNthClus(findFirstClus(entry));
+	struct stat tmp;
 	FILE* outputFile = fopen(dest, "w");	
-	char charBuf;
-	while(fread(&charBuf, sizeof(char), 1, file) && charBuf != '\0') fprintf(outputFile, "%c", charBuf);
+	if(errno == EACCES){
+		printf("%s: failed to open\n", dest);
+		exit(0);
+	}
+	char* charBuf = malloc(entry.DIR_FileSize);
+	printf("size: %u\n", entry.DIR_FileSize);
+	fread(charBuf, entry.DIR_FileSize, 1, file);
+	int i = 0;
+	while(i < entry.DIR_FileSize) fprintf(outputFile, "%c", charBuf[i++]);
+	free(charBuf);
 	fclose(outputFile);
 	fseek(file, backupPos, SEEK_SET);
 }
@@ -131,34 +146,37 @@ int recoverTargetFile(char* target, char* dest){
 		tmp = strtok(NULL, "/");
 	}
 	int i = 0; 
-	long curDirClus = bootSector.BPB_RootClus;
+	unsigned long curDirClus = bootSector.BPB_RootClus;
 	for(; i < tokenNum-1; i++) curDirClus = findDirClus(curDirClus, tokens[i]);
 	char target8Dot3Name[11];
 	to8Dot3Filename(target8Dot3Name, tokens[tokenNum-1]);
-	target8Dot3Name[0] = 229;	
-	printf("target8Dot3Name: %s\n", target8Dot3Name);
+	target8Dot3Name[0] = 0xe5;	
 	char buf[ENTRY_PER_DIR][sizeof(struct DirEntry)];
 /* A directory may contains more than one clustor*/
-	while(curDirClus != 0){
+	while(!CLUSTOR_END(curDirClus)){
 		setToNthClus(curDirClus);
 		fread(buf, sizeof(struct DirEntry), ENTRY_PER_DIR, file);
 		int j;
 		for(j = 0; j < ENTRY_PER_DIR && buf[j][0] != '\0'; j++, i++){
 			struct DirEntry *tmp = (struct DirEntry*)buf[j];
-			if(tmp->DIR_Attr & 16 ||  // directory
-			   tmp->DIR_Attr & 15 == 15 || //long file name
-			   tmp->DIR_Name[0] != 229) // normal file 
+			
+			//printf("%s %d, %d\n", tmp->DIR_Name, nextClus(findFirstClus(*tmp)), EOF); //Clustor occupied
+			if(tmp->DIR_Attr & 0x10 ||  // directory
+			   tmp->DIR_Attr == 0x0f || //long file name
+			   tmp->DIR_Name[0] != 0xe5) // normal file 
 				continue;
 			else{
 				if(memcmp(target8Dot3Name, tmp->DIR_Name, 11) == 0){
+					if(nextClus(findFirstClus(*tmp)) != 0 ||
+					   findFirstClus(*tmp) == 0)return -2; //Clustor occupied or data not written to disk 
 					recover(*tmp, dest);
-					return 0;
+					return 0;  //Success
 				}
 			}
 		}	
 		curDirClus = nextClus(curDirClus);
 	}
-	return -1;
+	return -1;   //No such file
 }
 
 int main(int argc, char** argv){
@@ -202,15 +220,27 @@ int main(int argc, char** argv){
 		exit(1);
 	}
 	
+
 	fread(bbuf, sizeof(struct BootEntry), 1, file);
 	memcpy(&bootSector, bbuf, sizeof(struct BootEntry));
 	dataAreaPosi = bootSector.BPB_BytsPerSec*(bootSector.BPB_RsvdSecCnt+bootSector.BPB_NumFATs*bootSector.BPB_FATSz32);
+	printf("rootClustor: %u\n", bootSector.BPB_RootClus);
 	if(targetDir != NULL){
 		listDirEntry(targetDir);
 	}
 
 	if(targetFile != NULL){
-		recoverTargetFile(targetFile, dest);
+		switch(recoverTargetFile(targetFile, dest)){
+			case 0:
+				printf("%s: recovered\n", targetFile);
+				break;
+			case -1:
+				printf("%s: error - file not found\n", targetFile);
+				break;
+			case -2:
+				printf("%s: error - fail to recover\n", targetFile);
+				break;
+		}
 	}
 
 	fclose(file);
