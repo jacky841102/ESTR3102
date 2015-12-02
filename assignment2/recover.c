@@ -7,6 +7,8 @@
 #include <errno.h>
 #define ENTRY_PER_DIR ((bootSector.BPB_BytsPerSec*bootSector.BPB_SecPerClus)/32)
 #define CLUSTOR_END(x) ({x >= 0xffffff8;})
+//#define DEBUG
+
 FILE* file;
 char bbuf[1024];
 struct BootEntry bootSector;
@@ -36,11 +38,13 @@ void setToNthClus(int n){
 /*Find next clustor from current clustor in FAT*/
 unsigned long nextClus(unsigned long curClus){
 	unsigned long backupPos = ftell(file);
-	unsigned long pos = bootSector.BPB_BytsPerSec*(bootSector.BPB_RsvdSecCnt)+4*(curClus-2);
+	unsigned long pos = bootSector.BPB_BytsPerSec*(bootSector.BPB_RsvdSecCnt)+4*curClus;
 	fseek(file, pos, SEEK_SET);
-	unsigned long next; 
+	unsigned int next; 
 	fread(&next, 4, 1, file);
-	printf("now: %u next: %u \n", curClus, next);
+	#ifdef DEBUG
+	printf("now: %lu next: %u \n", curClus, next);
+	#endif
 	fseek(file, backupPos, SEEK_SET);
 	return next;	 
 }
@@ -74,7 +78,9 @@ restore:
 
 void listDirEntry(char* targetDir){
 	unsigned long backupPos = ftell(file);
-	char *tmp = strtok(targetDir, "/");
+
+/*Directoy and subdirectory*/
+	char *tmp = strtok(targetDir, "/");     
 	unsigned long curDirClus = bootSector.BPB_RootClus;
 	while(tmp != NULL){
 		curDirClus = findDirClus(curDirClus, tmp);
@@ -94,7 +100,7 @@ void listDirEntry(char* targetDir){
 			printf("%d, ", i);
 			printFileName(tmp->DIR_Name);
 			if(tmp->DIR_Attr & 0x10) printf("/"); //directory
-			printf(", %ld, %d\n", tmp->DIR_FileSize, findFirstClus(*tmp));
+			printf(", %lu, %lu\n", tmp->DIR_FileSize, findFirstClus(*tmp));
 			i++;
 		}	
 		curDirClus = nextClus(curDirClus);
@@ -108,11 +114,11 @@ void to8Dot3Filename(char newFilename[11], char* filename){
 		for(i = 0; filename[i]!= '.'; i++) newFilename[i] = filename[i];
 		int j = i+1;
 		for(; i < 8; i++) newFilename[i] = ' ';
-		for(; j < strlen(filename); i++, j++) newFilename[i] = filename[j];
+		for(; j < 11 && j < strlen(filename); i++, j++) newFilename[i] = filename[j];
 		for(; i < 11; i++) newFilename[i] = ' '; 
 	}else{
 		int i;
-		for(i = 0; i < strlen(filename); i++) newFilename[i] = filename[i];
+		for(i = 0; i < 11 && strlen(filename); i++) newFilename[i] = filename[i];
 		for(; i < 11; i++) newFilename[i] = ' ';
 	}
 }
@@ -120,17 +126,17 @@ void to8Dot3Filename(char newFilename[11], char* filename){
 void recover(struct DirEntry entry, char* dest){
 	unsigned long backupPos = ftell(file);
 	setToNthClus(findFirstClus(entry));
-	struct stat tmp;
 	FILE* outputFile = fopen(dest, "w");	
 	if(errno == EACCES){
 		printf("%s: failed to open\n", dest);
 		exit(0);
 	}
 	char* charBuf = malloc(entry.DIR_FileSize);
-	printf("size: %u\n", entry.DIR_FileSize);
+	#ifdef DEBUG
+	printf("size: %lu\n", entry.DIR_FileSize);
+	#endif
 	fread(charBuf, entry.DIR_FileSize, 1, file);
-	int i = 0;
-	while(i < entry.DIR_FileSize) fprintf(outputFile, "%c", charBuf[i++]);
+	fwrite(charBuf, entry.DIR_FileSize, 1, outputFile);
 	free(charBuf);
 	fclose(outputFile);
 	fseek(file, backupPos, SEEK_SET);
@@ -147,7 +153,8 @@ int recoverTargetFile(char* target, char* dest){
 	}
 	int i = 0; 
 	unsigned long curDirClus = bootSector.BPB_RootClus;
-	for(; i < tokenNum-1; i++) curDirClus = findDirClus(curDirClus, tokens[i]);
+	for(i = 0; i < tokenNum-1; i++) curDirClus = findDirClus(curDirClus, tokens[i]);
+	
 	char target8Dot3Name[11];
 	to8Dot3Filename(target8Dot3Name, tokens[tokenNum-1]);
 	target8Dot3Name[0] = 0xe5;	
@@ -167,8 +174,11 @@ int recoverTargetFile(char* target, char* dest){
 				continue;
 			else{
 				if(memcmp(target8Dot3Name, tmp->DIR_Name, 11) == 0){
-					if(nextClus(findFirstClus(*tmp)) != 0 ||
-					   findFirstClus(*tmp) == 0)return -2; //Clustor occupied or data not written to disk 
+					if(findFirstClus(*tmp) == 0){
+						recover(*tmp, dest);
+						return 0;
+					}
+					if(nextClus(findFirstClus(*tmp)) != 0) return -2; //Clustor occupied or data not written to disk 
 					recover(*tmp, dest);
 					return 0;  //Success
 				}
@@ -180,7 +190,7 @@ int recoverTargetFile(char* target, char* dest){
 }
 
 int main(int argc, char** argv){
-	int ch, fd;
+	int ch;
 	char *device = NULL, *targetDir = NULL, *targetFile = NULL, *dest = NULL; 
 	if(argc == 1){
 		usage(argv[0]);	
@@ -191,18 +201,34 @@ int main(int argc, char** argv){
 	while((ch = getopt(argc, argv, "d:l:r:o:")) != -1){
 		switch(ch){
 			case 'd':
+				if(device != NULL){
+					usage(argv[0]);	
+					exit(1);
+				}
 				device = malloc(strlen(optarg));
 				strcpy(device, optarg);
 				break;
 			case 'l':
+				if(targetDir != NULL){
+					usage(argv[0]);	
+					exit(1);
+				}
 				targetDir = malloc(strlen(optarg));
 				strcpy(targetDir, optarg);
 				break;
 			case 'r':
+				if(targetFile != NULL){
+					usage(argv[0]);	
+					exit(1);
+				}
 				targetFile = malloc(strlen(optarg));
 				strcpy(targetFile, optarg);
 				break;
 			case 'o':
+				if(dest != NULL){
+					usage(argv[0]);	
+					exit(1);
+				}
 				dest = malloc(strlen(optarg));
 				strcpy(dest, optarg);
 				break;
@@ -212,19 +238,24 @@ int main(int argc, char** argv){
 				exit(0);
 		}
 	}
-	if(device == NULL) usage(argv[0]);
-	
+	if(device == NULL){
+		usage(argv[0]);
+		exit(1);
+	}
 	file = fopen(device, "r");
 	if(file == NULL){
 		perror(device);
 		exit(1);
 	}
 	
-
 	fread(bbuf, sizeof(struct BootEntry), 1, file);
 	memcpy(&bootSector, bbuf, sizeof(struct BootEntry));
+	
 	dataAreaPosi = bootSector.BPB_BytsPerSec*(bootSector.BPB_RsvdSecCnt+bootSector.BPB_NumFATs*bootSector.BPB_FATSz32);
-	printf("rootClustor: %u\n", bootSector.BPB_RootClus);
+	#ifdef DEBUG
+	printf("rootClustor: %lu\n", bootSector.BPB_RootClus);
+	#endif
+
 	if(targetDir != NULL){
 		listDirEntry(targetDir);
 	}
