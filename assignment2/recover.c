@@ -59,7 +59,7 @@ unsigned long findFirstClus(struct DirEntry curDirEntry){
 
 unsigned long findDirClus(unsigned long curDirClus, unsigned char* target){
 	unsigned long backupPos = ftell(file);
-	char buf[ENTRY_PER_DIR][sizeof(struct DirEntry)];
+	unsigned char buf[ENTRY_PER_DIR][sizeof(struct DirEntry)];
 /* A directory may contains more than one clustor*/
 	unsigned long targetDirClus;
 	while(!CLUSTOR_END(curDirClus)){
@@ -68,7 +68,10 @@ unsigned long findDirClus(unsigned long curDirClus, unsigned char* target){
 		int i;
 		for(i = 0; i < ENTRY_PER_DIR; i++){
 			struct DirEntry *tmp = (struct DirEntry*)buf[i];
-			if(memcmp(target, tmp->DIR_Name, strlen(target)) == 0){
+			int len = 0; 
+			for(; tmp->DIR_Name[len] != ' ' && len < 8; len++);
+			if(len == strlen(target) && memcmp(target, tmp->DIR_Name, len) == 0){
+	//			printf("len = %d strlen(target) = %d\n", len, strlen(target));		
 				targetDirClus = findFirstClus(*tmp);
 				goto restore;
 			}
@@ -83,7 +86,7 @@ restore:
 void listDirEntry(unsigned char* targetDir){
 	unsigned long backupPos = ftell(file);
 /*Directoy and subdirectory*/
-	char *tmp = strtok(targetDir, "/");     
+	unsigned char *tmp = strtok(targetDir, "/");     
 	unsigned long curDirClus = bootSector.BPB_RootClus;
 	while(tmp != NULL){
 		curDirClus = findDirClus(curDirClus, tmp);
@@ -126,7 +129,7 @@ void to8Dot3Filename(unsigned char newFilename[11], unsigned char* filename){
 	}
 }
 
-void recover(struct DirEntry entry,  unsigned char* dest){
+void recover(struct DirEntry entry, unsigned char* dest){
 	unsigned long backupPos = ftell(file);
 	setToNthClus(findFirstClus(entry));
 	FILE* outputFile = fopen(dest, "w");	
@@ -196,9 +199,9 @@ int main(int argc, char** argv){
 		usage(argv[0]);	
 		exit(0);
 	}
-	if (strcmp(argv[1], "-d") != 0){
+	if(strcmp(argv[1], "-d") != 0){
 		usage(argv[0]);
-		exit(1);
+		exit(0);
 	}
 	/* Handle option argument*/
 	while((ch = getopt(argc, argv, "d:l:r:o:")) != -1){
